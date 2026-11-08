@@ -413,6 +413,12 @@ static int read(vl53l0x_t *d)
 int vl53l0x_ping(vl53l0x_t *d)
 {
     start(d);
+    /*
+     * The first interrupt after a long idle can belong to the previous
+     * continuous-ranging cycle. Clear that result, then wait for the next
+     * completed measurement so the returned range matches the current pose.
+     */
+    (void)read(d);
     int distance = read(d);
     stop(d);
     return distance;

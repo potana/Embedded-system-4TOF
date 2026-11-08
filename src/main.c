@@ -13,6 +13,7 @@
 #include "pico/stdlib.h"
 
 #include "depth_color.h"
+#include "lidar_map.h"
 #include "machine.h"
 #include "pyexc.h"
 #include "st7735.h"
@@ -52,9 +53,10 @@ static vl53l1x_t sensor_2, sensor_4;
 
 #define MAX_VALID_MM 2000    /* maximum range plotted; sets the scale too */
 #define SCALE        ((float)CLOUD_RADIUS_PX / MAX_VALID_MM)   /* px per mm */
-#define STEP_DEG     15
+#define STEP_DEG     LIDAR_STEP_DEG
 #define SCAN_PERIOD_MS 5000  /* automatic scan; GP20 also scans straight away */
-static int angle = 0;
+static int rotation_deg;
+static lidar_map_t lidar;
 
 /* ---- Distance read-out: four text lines in a strip at the bottom ---- */
 /* The strip is kept free of plotted dots (see plot()). */
@@ -122,10 +124,6 @@ static int safe_read(reader_t r)
 
 static void plot(int dist_mm, int deg)
 {
-    if (dist_mm == NONE) return;              /* I2C error: no reading at all */
-    /* Nothing detected (the sensors report a value past their range): show
-     * it at the maximum range, on the edge of the plot. */
-    if (dist_mm > MAX_VALID_MM) dist_mm = MAX_VALID_MM;
     float r = (float)deg * (3.14159265f / 180.0f);       /* math.radians() */
     int x = CX + (int)(dist_mm * SCALE * cosf(r));
     int y = CY - (int)(dist_mm * SCALE * sinf(r));
@@ -134,6 +132,31 @@ static void plot(int dist_mm, int deg)
     if (0 <= x0 && x0 + DOT_SIZE <= 127 && 0 <= y0 && y0 + DOT_SIZE <= READOUT_Y0 - 2) {
         tft_fillrect(&tft, x0, y0, DOT_SIZE, DOT_SIZE, depth_color565(dist_mm, MAX_VALID_MM));
     }
+}
+
+static void render_lidar(void)
+{
+    /* Rebuild only the plot region; keep the four live text read-outs. */
+    tft_fillrect(&tft, 0, 0, 128, READOUT_Y0 - 1, TFT_BLACK);
+    tft_rect(&tft, CX - 9, CY, 19, 1, TFT_WHITE);
+    tft_rect(&tft, CX, CY - 9, 1, 19, TFT_WHITE);
+    for (int bin = 0; bin < LIDAR_BINS; ++bin) {
+        const lidar_point_t *point = &lidar.point[bin];
+        if (point->valid) plot(point->distance_mm, bin * LIDAR_STEP_DEG);
+    }
+}
+
+/* Host mode: the PC (tools/scan3d.py) sends 'S' once the gimbal has stopped and
+ * gets "S d1 d2 d3 d4\n" back.  Distances are raw mm (8190 = nothing detected),
+ * -1 = I2C error.  The first 'S' switches off the timed/button scans, which
+ * would otherwise take readings while the gimbal is moving. */
+static bool host_mode;
+
+static void host_scan(void)
+{
+    int d[4];
+    for (int i = 0; i < 4; i++) d[i] = safe_read((reader_t)i);
+    printf("S %d %d %d %d\n", d[0], d[1], d[2], d[3]);
 }
 
 static void fmt_value(char *buf, size_t n, int v)
@@ -179,9 +202,20 @@ int main(void)
 
     draw_labels();
 
+    lidar_map_clear(&lidar);
     absolute_time_t next_scan = get_absolute_time();
+    bool button_was_down = false;
     for (;;) {
-        if (time_reached(next_scan) || gpio_get(BUTTON_PIN) == 0) {
+        const bool button_down = gpio_get(BUTTON_PIN) == 0;
+        const bool button_pressed = button_down && !button_was_down;
+        button_was_down = button_down;
+
+        if (getchar_timeout_us(0) == 'S') {
+            host_mode = true;
+            host_scan();
+        }
+
+        if (!host_mode && (time_reached(next_scan) || button_pressed)) {
             next_scan = make_timeout_time_ms(SCAN_PERIOD_MS);
 
             /* read each sensor once, then plot it and show its distance */
@@ -196,10 +230,14 @@ int main(void)
              * stops updating, go back to tft_init_7735(&tft, TFT_GREENTAB). */
             tft_refresh(&tft);
 
-            plot(d1, angle);
-            plot(d2, angle + 90);
-            plot(d3, angle + 180);
-            plot(d4, angle + 270);
+            const int distances[4] = {d1, d2, d3, d4};
+            for (uint8_t sensor = 0; sensor < 4; ++sensor) {
+                const int distance = distances[sensor];
+                const bool valid = distance != NONE && distance > 0 &&
+                                   distance < MAX_VALID_MM;
+                lidar_map_update(&lidar, sensor, rotation_deg, distance, valid);
+            }
+            render_lidar();
 
             show_distance(0, d1);
             show_distance(1, d2);
@@ -210,10 +248,12 @@ int main(void)
             fmt_value(b, sizeof b, d2);
             fmt_value(c, sizeof c, d3);
             fmt_value(e, sizeof e, d4);
-            printf("angle=%d  S1=%s S2=%s S3=%s S4=%s mm\n", angle, a, b, c, e);
+            printf("clockwise=%d deg points=%d/72  S1=%s S2=%s S3=%s S4=%s mm\n",
+                   rotation_deg, lidar_map_valid_count(&lidar), a, b, c, e);
 
-            angle += STEP_DEG;
+            rotation_deg = (rotation_deg + STEP_DEG) % 360;
             sleep_ms(300);
         }
+        sleep_ms(5);
     }
 }

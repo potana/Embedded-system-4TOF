@@ -17,6 +17,7 @@ set(TOF4_DRIVERS
     src/vl53l0x.c
     src/vl53l1x.c
     src/depth_color.c
+    src/lidar_map.c
 )
 
 # tof4_c: the scanner.  tof4_c_lcdtest (lcd_test.c) shows which step stops the
@@ -31,6 +32,7 @@ foreach(target IN ITEMS tof4_c tof4_c_lcdtest tof4_c_bench)
     endif()
 
     target_link_libraries(${target} pico_stdlib hardware_gpio)
+    target_include_directories(${target} PRIVATE src)
     target_compile_options(${target} PRIVATE -Wall -Wextra)
 
     # print() goes to the USB serial port, like the Thonny shell
