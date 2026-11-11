@@ -56,5 +56,9 @@ void tft_vline(tft_t *t, int x, int y, int len, uint16_t color);
 void tft_rect(tft_t *t, int x, int y, int w, int h, uint16_t color);
 void tft_fillrect(tft_t *t, int x, int y, int w, int h, uint16_t color);
 void tft_fill(tft_t *t, uint16_t color);
+/* Copy a w x h block of RGB565 pixels to (x, y) with one window set-up.  `pix`
+ * is the top-left pixel and `stride` the pixels per source row, so a sub-
+ * rectangle of a framebuffer can be sent.  Not part of ST7735.py. */
+void tft_blit(tft_t *t, int x, int y, int w, int h, const uint16_t *pix, int stride);
 
 #endif

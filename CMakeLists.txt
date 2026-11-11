@@ -18,6 +18,7 @@ set(TOF4_DRIVERS
     src/vl53l1x.c
     src/depth_color.c
     src/lidar_map.c
+    src/lidar_view.c
 )
 
 # tof4_c: the scanner.  tof4_c_lcdtest (lcd_test.c) shows which step stops the

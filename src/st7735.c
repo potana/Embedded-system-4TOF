@@ -280,6 +280,26 @@ void tft_fill(tft_t *t, uint16_t color)
     tft_fillrect(t, 0, 0, t->size[0], t->size[1], color);
 }
 
+void tft_blit(tft_t *t, int x, int y, int w, int h, const uint16_t *pix, int stride)
+{
+    if (w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > t->size[0] || y + h > t->size[1]) return;
+    setwindowloc(t, x, y, x + w - 1, y + h - 1);
+    gpio_put(t->dc, 1);
+    for (int r = 0; r < h; r++) {
+        const uint16_t *row = pix + (size_t)r * (size_t)stride;
+        for (int c = 0; c < w;) {
+            int n = w - c;
+            if (n > 32) n = 32;                       /* buf holds 32 pixels */
+            for (int i = 0; i < n; i++) {
+                t->buf[2 * i]     = (uint8_t)(row[c + i] >> 8);
+                t->buf[2 * i + 1] = (uint8_t)row[c + i];
+            }
+            soft_spi_write(t->spi, t->buf, (size_t)n * 2);
+            c += n;
+        }
+    }
+}
+
 static void tft_reset(tft_t *t)
 {
     gpio_put(t->dc, 0);
